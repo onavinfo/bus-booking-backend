@@ -1,89 +1,139 @@
-const express = require('express');
-const path = require('path');
-const fs = require('fs');
-const bodyParser = require('body-parser');
-const cors = require('cors');
-const session = require('express-session')
-const MongoStore = require('connect-mongo').default;
-const User = require('./Models/userModel')
+const express = require("express");
+const path = require("path");
+const bodyParser = require("body-parser");
+const cors = require("cors");
+const session = require("express-session");
+const MongoStore = require("connect-mongo");
+const mongoose = require("mongoose");
+require("dotenv").config();
 
-const DB_PATH = "mongodb+srv://puridivya314_db_user:lYYsoCBMYqhyrquy@cluster0.sxtloss.mongodb.net/busData";
-
-const dns = require('dns');
+const dns = require("dns");
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
-const rootDir = require('./utils/pathUtil');
-const { default: mongoose } = require('mongoose');
+const rootDir = require("./utils/pathUtil");
+const User = require("./Models/userModel");
 
-const { authRouter } = require('./Routes/authRouter');
-const { busRouter } = require('./Routes/busRouter');
-const { pathRouter } = require('./Routes/pathRouter');
-//const {scheduleRouter} = require('./Routes/scheduleRouter');
-const { profileRouter } = require('./Routes/profileRouter');
-const { bookRouter } = require('./Routes/bookRouter');
+const { authRouter } = require("./Routes/authRouter");
+const { busRouter } = require("./Routes/busRouter");
+const { pathRouter } = require("./Routes/pathRouter");
+const { profileRouter } = require("./Routes/profileRouter");
+const { bookRouter } = require("./Routes/bookRouter");
 const { revenueRouter } = require("./Routes/revenueRouter");
 
 const app = express();
 
-app.use(express.urlencoded());
-app.use(cors({
-    origin: "http://localhost:5173",
+// ======================
+// MIDDLEWARE
+// ======================
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+app.use(
+  cors({
+    origin: "https://bus-booking-frontend-bice.vercel.app",
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type"]
-}));
+    allowedHeaders: ["Content-Type"],
+  })
+);
 
-app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static(path.join(rootDir, 'public')));
 
-const store = MongoStore.create({
-    mongoUrl: DB_PATH,
-    collectionName: 'sessions'
-});
+app.use(express.static(path.join(rootDir, "public")));
 
-app.use(session({
+app.use(
+  "/uploads",
+  express.static(path.join(__dirname, "uploads"))
+);
+
+// ======================
+// DATABASE
+// ======================
+
+const db = process.env.DB_PATH;
+
+if (!db) {
+  console.log("❌ DB_PATH is missing in Vercel Environment Variables");
+}
+
+// ======================
+// MONGODB CONNECTION
+// ======================
+
+mongoose
+  .connect(db)
+  .then(() => {
+    console.log("✅ MongoDB Connected");
+  })
+  .catch((err) => {
+    console.log("❌ MongoDB Connection Error:", err);
+  });
+
+// ======================
+// SESSION CONFIG
+// ======================
+
+app.use(
+  session({
     secret: "Bus system",
     resave: false,
     saveUninitialized: false,
-    store: store,
-    cookie: {
-        secure: false,
-        httpOnly: true,
-        sameSite: "lax",
-        maxAge: 1000 * 60 * 60 * 24 // 1 day
-    }
-}));
 
-app.use("/uploads",
-    express.static(
-        path.join(__dirname, "uploads"))
+    store: MongoStore.create({
+      mongoUrl: db,
+      collectionName: "sessions",
+    }),
+
+    cookie: {
+      secure: false,
+      httpOnly: true,
+      sameSite: "lax",
+      maxAge: 1000 * 60 * 60 * 24, // 1 day
+    },
+  })
 );
 
-// if (!fs.existsSync(uploadPath)) {
-//     fs.mkdirSync(uploadPath, { recursive: true });
-// }
+// ======================
+// USER AUTH MIDDLEWARE
+// ======================
 
 app.use(async (req, res, next) => {
-    res.locals.isLoggedIn = req.session.isLoggedIn || false;
-    if (!req.session.userId) {
-        res.user = null;
-        return next();
+  res.locals.isLoggedIn = req.session.isLoggedIn || false;
+
+  if (!req.session.userId) {
+    req.user = null;
+    return next();
+  }
+
+  try {
+    const user = await User.findById(req.session.userId);
+
+    if (!user) {
+      req.user = null;
+      return next();
     }
-    try {
-        const user = await User.findById(req.session.userId);
-        if (!user) {
-            res.locals.user = null;
-            return next();
-        }
-        req.user = user || null;
-        res.locals.user = user || null;
-    } catch (err) {
-        console.log(err);
-    }
-    next();
+
+    req.user = user;
+    res.locals.user = user;
+  } catch (err) {
+    console.log(err);
+  }
+
+  next();
 });
 
+// ======================
+// TEST ROUTE
+// ======================
+
+app.get("/", (req, res) => {
+  res.send("✅ Backend running successfully");
+});
+
+// ======================
+// ROUTES
+// ======================
 
 app.use(authRouter);
 app.use(busRouter);
@@ -92,14 +142,8 @@ app.use(profileRouter);
 app.use(bookRouter);
 app.use(revenueRouter);
 
+// ======================
+// EXPORT APP
+// ======================
 
-const port = 3000;
-mongoose.connect(DB_PATH).then(() => {
-    console.log("Connected to mongoose");
-    app.listen(port, () => {
-        console.log(`Server running on address: http://localhost:${port}`);
-    });
-}).catch((err) => {
-    console.log("Error while connecting to mongoose", err);
-});
-
+module.exports = app;
